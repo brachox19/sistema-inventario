@@ -18,7 +18,6 @@ auth_token = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODk4N
 
 conn = libsql.connect(database=url, auth_token=auth_token)
 
-# Función auxiliar para ejecutar consultas y retornar DataFrames fácilmente
 def ejecutar_sql_df(query, params=()):
     cursor = conn.execute(query, params)
     rows = cursor.fetchall()
@@ -87,19 +86,51 @@ conn.execute(
 )
 conn.commit()
 
-# Control de sesión
-if "rol" not in st.session_state:
-    st.session_state["rol"] = "admin"
+# ---------------------------------------------------------
+# SISTEMA DE AUTENTICACIÓN (LOGIN)
+# ---------------------------------------------------------
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+    st.session_state["rol"] = ""
+
+if not st.session_state["logged_in"]:
+    st.title("🔐 Iniciar Sesión - Sistema de Inventario")
+    st.markdown("Por favor, ingresa tus credenciales para acceder al sistema.")
+    
+    with st.form("login_form"):
+        usuario_input = st.selectbox("Seleccionar Usuario", ["admin", "Isell"])
+        password_input = st.text_input("Contraseña", type="password")
+        submit_login = st.form_submit_button("Entrar al Sistema")
+        
+        if submit_login:
+            # Contraseñas configuradas por defecto (puedes cambiarlas aquí)
+            if usuario_input == "admin" and password_input == "admin123":
+                st.session_state["logged_in"] = True
+                st.session_state["rol"] = "admin"
+                st.success("¡Bienvenido Administrador!")
+                st.rerun()
+            elif usuario_input == "Isell" and password_input == "isell123":
+                st.session_state["logged_in"] = True
+                st.session_state["rol"] = "Isell"
+                st.success("¡Bienvenido Isell!")
+                st.rerun()
+            else:
+                st.error("Contraseña incorrecta. Inténtalo de nuevo.")
+    st.stop() # Detiene la ejecución hasta que inicie sesión correctamente
 
 if "carrito" not in st.session_state:
     st.session_state["carrito"] = []
 
 # ---------------------------------------------------------
-# INTERFAZ Y NAVEGACIÓN
+# INTERFAZ Y NAVEGACIÓN (POST-LOGIN)
 # ---------------------------------------------------------
 st.sidebar.title("Menú Principal")
-rol_usuario = st.sidebar.selectbox("Rol de Usuario", ["admin", "Isell"])
-st.session_state["rol"] = rol_usuario
+st.sidebar.write(f"👤 Usuario: **{st.session_state['rol']}**")
+
+if st.sidebar.button("Cerrar Sesión"):
+    st.session_state["logged_in"] = False
+    st.session_state["rol"] = ""
+    st.rerun()
 
 menu = [
     "🛒 Registrar Venta",
@@ -220,7 +251,7 @@ if opcion == "🛒 Registrar Venta":
                         tipo_pago,
                         metodo_pago,
                         float(total_venta),
-                        rol_usuario,
+                        st.session_state["rol"],
                     ),
                 )
                 conn.commit()
@@ -266,7 +297,7 @@ if opcion == "🛒 Registrar Venta":
 # ----------------------------------------------------
 elif opcion == "📦 Inventario de Productos":
     st.header("📦 Inventario de Productos")
-    if rol_usuario == "admin":
+    if st.session_state["rol"] == "admin":
         with st.expander("Agregar Nuevo Producto"):
             with st.form("form_prod"):
                 codigo = st.text_input("Código")
@@ -383,7 +414,7 @@ elif opcion == "📊 Reportes de Ventas":
         total_ingresos = df_v["total"].sum()
         st.metric("Total Ingresos Acumulados", f"${total_ingresos:.2f}")
 
-    if rol_usuario == "admin":
+    if st.session_state["rol"] == "admin":
         st.markdown("---")
         col1, col2 = st.columns(2)
         with col1:
