@@ -1,7 +1,7 @@
 from datetime import datetime
 import pandas as pd
 import streamlit as st
-import libsql_client
+import libsql
 
 # ---------------------------------------------------------
 # CONFIGURACIÓN DE LA PÁGINA
@@ -16,13 +16,13 @@ st.set_page_config(
 url = "libsql://inventario-vps-brachox19.aws-us-west-2.turso.io"
 auth_token = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODk4NzAzMjMsImlkIjoiMDFhMGJjNmItNWUwMS03YTQ5LWIyNzUtNDVmNWVmNzZmMjdmIiwia2lkIjoiNHZndmFuRWwwLU42NXV0eUpHdGZwMUhIaVpYTTJ5djhpU1ZoMmQ2QnZObyIsInJpZCI6ImM0ZTQ2NGRhLTM0YjAtNDI1Zi04NTBlLTAxM2U4OWVjOWU5YyJ9._Ib0ChcvCfDY5lzbUKFThJ9lUfHEy0LsLsadImEkFs8K39y0yE1RiQNqoHDG30gDCQF88Ap0YFkGemqCy89zBg"
 
-conn = libsql_client.create_client(url=url, auth_token=auth_token)
+conn = libsql.connect(database=url, auth_token=auth_token)
 
 # Función auxiliar para ejecutar consultas y retornar DataFrames fácilmente
 def ejecutar_sql_df(query, params=()):
-    res = conn.execute(query, params)
-    rows = res.rows
-    cols = [col.name for col in res.columns] if res.columns else []
+    cursor = conn.execute(query, params)
+    rows = cursor.fetchall()
+    cols = [description[0] for description in cursor.description] if cursor.description else []
     return pd.DataFrame(rows, columns=cols)
 
 # Creación de tablas en Turso
@@ -37,6 +37,7 @@ conn.execute(
                 stock INTEGER
             )"""
 )
+conn.commit()
 
 conn.execute(
     """CREATE TABLE IF NOT EXISTS clientes (
@@ -47,6 +48,7 @@ conn.execute(
                 direccion TEXT
             )"""
 )
+conn.commit()
 
 conn.execute(
     """CREATE TABLE IF NOT EXISTS ventas (
@@ -59,6 +61,7 @@ conn.execute(
                 vendedor TEXT
             )"""
 )
+conn.commit()
 
 conn.execute(
     """CREATE TABLE IF NOT EXISTS detalle_ventas (
@@ -70,6 +73,7 @@ conn.execute(
                 subtotal REAL
             )"""
 )
+conn.commit()
 
 conn.execute(
     """CREATE TABLE IF NOT EXISTS cuentas_por_cobrar (
@@ -81,6 +85,7 @@ conn.execute(
                 estado TEXT
             )"""
 )
+conn.commit()
 
 # Control de sesión
 if "rol" not in st.session_state:
@@ -207,7 +212,7 @@ if opcion == "🛒 Registrar Venta":
             if st.button("Procesar Venta"):
                 fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
-                res_venta = conn.execute(
+                cursor_v = conn.execute(
                     "INSERT INTO ventas (fecha, cliente, tipo_pago, metodo_pago, total, vendedor) VALUES (?, ?, ?, ?, ?, ?)",
                     (
                         fecha_actual,
@@ -218,8 +223,8 @@ if opcion == "🛒 Registrar Venta":
                         rol_usuario,
                     ),
                 )
-                
-                venta_id = res_venta.last_rowid
+                conn.commit()
+                venta_id = cursor_v.lastrowid
 
                 for item in st.session_state["carrito"]:
                     subtotal = item["precio"] * item["cantidad"]
@@ -237,6 +242,7 @@ if opcion == "🛒 Registrar Venta":
                         "UPDATE productos SET stock = stock - ? WHERE codigo = ?",
                         (int(item["cantidad"]), str(item["codigo"])),
                     )
+                conn.commit()
 
                 if tipo_pago == "Crédito (A plazo)":
                     conn.execute(
@@ -249,6 +255,7 @@ if opcion == "🛒 Registrar Venta":
                             "Pendiente",
                         ),
                     )
+                    conn.commit()
 
                 st.session_state["carrito"] = []
                 st.success("¡Venta registrada exitosamente en la nube!")
@@ -277,6 +284,7 @@ elif opcion == "📦 Inventario de Productos":
                             "INSERT INTO productos (codigo, nombre, categoria, precio, costo, stock) VALUES (?, ?, ?, ?, ?, ?)",
                             (codigo, nombre, categoria, float(precio), float(costo), int(stock)),
                         )
+                        conn.commit()
                         st.success("Producto agregado correctamente.")
                         st.rerun()
                     except Exception as e:
@@ -303,6 +311,7 @@ elif opcion == "👥 Clientes":
                         "INSERT INTO clientes (cedula, nombre, telefono, direccion) VALUES (?, ?, ?, ?)",
                         (cedula, nombre, telefono, direccion),
                     )
+                    conn.commit()
                     st.success("Cliente registrado con éxito.")
                     st.rerun()
                 except Exception as e:
@@ -354,6 +363,7 @@ elif opcion == "💳 Cuentas por Cobrar":
                 "UPDATE cuentas_por_cobrar SET monto_pendiente = ?, estado = ? WHERE id = ?",
                 (float(nuevo_pendiente), str(nuevo_estado), int(selected_id)),
             )
+            conn.commit()
             st.success("Pago registrado correctamente.")
             st.rerun()
     else:
@@ -386,6 +396,7 @@ elif opcion == "📊 Reportes de Ventas":
                     conn.execute("DELETE FROM ventas")
                     conn.execute("DELETE FROM detalle_ventas")
                     conn.execute("DELETE FROM cuentas_por_cobrar")
+                    conn.commit()
                     st.success(
                         "✅ Historial de ventas limpiado correctamente."
                     )
@@ -407,6 +418,7 @@ elif opcion == "📊 Reportes de Ventas":
                     conn.execute("DELETE FROM cuentas_por_cobrar")
                     conn.execute("DELETE FROM productos")
                     conn.execute("DELETE FROM clientes")
+                    conn.commit()
                     if "carrito" in st.session_state:
                         st.session_state["carrito"] = []
                     st.success(
