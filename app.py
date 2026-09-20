@@ -16,7 +16,7 @@ st.set_page_config(
 url = "libsql://inventario-vps-brachox19.aws-us-west-2.turso.io"
 auth_token = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODk4NzAzMjMsImlkIjoiMDFhMGJjNmItNWUwMS03YTQ5LWIyNzUtNDVmNWVmNzZmMjdmIiwia2lkIjoiNHZndmFuRWwwLU42NXV0eUpHdGZwMUhIaVpYTTJ5djhpU1ZoMmQ2QnZObyIsInJpZCI6ImM0ZTQ2NGRhLTM0YjAtNDI1Zi04NTBlLTAxM2U4OWVjOWU5YyJ9._Ib0ChcvCfDY5lzbUKFThJ9lUfHEy0LsLsadImEkFs8K39y0yE1RiQNqoHDG30gDCQF88Ap0YFkGemqCy89zBg"
 
-conn = libsql_client.connect(url=url, auth_token=auth_token)
+conn = libsql_client.create_client(url=url, auth_token=auth_token)
 
 # Función auxiliar para ejecutar consultas y retornar DataFrames fácilmente
 def ejecutar_sql_df(query, params=()):
@@ -207,7 +207,6 @@ if opcion == "🛒 Registrar Venta":
             if st.button("Procesar Venta"):
                 fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
-                # Insertar venta
                 res_venta = conn.execute(
                     "INSERT INTO ventas (fecha, cliente, tipo_pago, metodo_pago, total, vendedor) VALUES (?, ?, ?, ?, ?, ?)",
                     (
@@ -220,7 +219,6 @@ if opcion == "🛒 Registrar Venta":
                     ),
                 )
                 
-                # Obtener el último ID insertado en Turso
                 venta_id = res_venta.last_rowid
 
                 for item in st.session_state["carrito"]:
