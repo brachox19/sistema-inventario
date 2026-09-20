@@ -288,7 +288,7 @@ if opcion == "🛒 Registrar Venta":
                 st.rerun()
 
 # ----------------------------------------------------
-# INVENTARIO DE PRODUCTOS (CON PESTAÑAS DE AGREGAR Y EDITAR)
+# INVENTARIO DE PRODUCTOS (AGREGAR, EDITAR Y ELIMINAR)
 # ----------------------------------------------------
 elif opcion == "📦 Inventario de Productos":
     st.header("📦 Inventario de Productos")
@@ -296,7 +296,7 @@ elif opcion == "📦 Inventario de Productos":
     df_prod = ejecutar_sql_df("SELECT * FROM productos")
 
     if st.session_state["rol"] == "admin":
-        tab1, tab2 = st.tabs(["➕ Agregar Producto", "✏️ Editar Producto"])
+        tab1, tab2, tab3 = st.tabs(["➕ Agregar Producto", "✏️ Editar Producto", "🗑️ Eliminar Producto"])
         
         with tab1:
             with st.form("form_prod"):
@@ -321,7 +321,7 @@ elif opcion == "📦 Inventario de Productos":
 
         with tab2:
             if not df_prod.empty:
-                prod_a_editar = st.selectbox("Selecciona el código del producto a editar", df_prod["codigo"].astype(str))
+                prod_a_editar = st.selectbox("Selecciona el código del producto a editar", df_prod["codigo"].astype(str), key="edit_sel")
                 p_actual = df_prod[df_prod["codigo"].astype(str) == prod_a_editar].iloc[0]
                 
                 with st.form("form_edit_prod"):
@@ -341,12 +341,34 @@ elif opcion == "📦 Inventario de Productos":
                                 (nuevo_nombre, nueva_categoria, float(nuevo_precio), float(nuevo_costo), int(nuevo_stock), prod_a_editar),
                             )
                             conn.commit()
-                            st.success("¡Producto actualizado exitosamente en la base de datos!")
+                            st.success("¡Producto actualizado exitosamente!")
                             st.rerun()
                         except Exception as e:
                             st.error(f"Error al actualizar: {e}")
             else:
                 st.info("No hay productos registrados para editar.")
+
+        with tab3:
+            if not df_prod.empty:
+                prod_a_eliminar = st.selectbox("Selecciona el código del producto a eliminar", df_prod["codigo"].astype(str), key="del_sel")
+                p_info_del = df_prod[df_prod["codigo"].astype(str) == prod_a_eliminar].iloc[0]
+                
+                st.warning(f"¿Estás seguro de que deseas eliminar el producto **{p_info_del['nombre']}** (Código: {prod_a_eliminar})?")
+                confirm_del = st.checkbox("Confirmo que deseo eliminar este producto permanentemente")
+                
+                if st.button("Eliminar Producto"):
+                    if confirm_del:
+                        try:
+                            conn.execute("DELETE FROM productos WHERE codigo = ?", (prod_a_eliminar,))
+                            conn.commit()
+                            st.success("¡Producto eliminado exitosamente de la base de datos!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al eliminar: {e}")
+                    else:
+                        st.error("Debes marcar la casilla de confirmación para proceder.")
+            else:
+                st.info("No hay productos registrados para eliminar.")
 
     df_prod_actualizado = ejecutar_sql_df("SELECT * FROM productos")
     st.dataframe(df_prod_actualizado, use_container_width=True)
