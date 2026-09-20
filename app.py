@@ -1,7 +1,7 @@
 from datetime import datetime
-import sqlite3
 import pandas as pd
 import streamlit as st
+import libsql_client
 
 # ---------------------------------------------------------
 # CONFIGURACIÓN DE LA PÁGINA
@@ -11,13 +11,22 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------
-# CONEXIÓN Y BASE DE DATOS
+# CONEXIÓN A TURSO (NUBE)
 # ---------------------------------------------------------
-conn = sqlite3.connect("inventario.db", check_same_thread=False)
-c = conn.cursor()
+url = "libsql://inventario-vps-brachox19.aws-us-west-2.turso.io"
+auth_token = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3ODk4NzAzMjMsImlkIjoiMDFhMGJjNmItNWUwMS03YTQ5LWIyNzUtNDVmNWVmNzZmMjdmIiwia2lkIjoiNHZndmFuRWwwLU42NXV0eUpHdGZwMUhIaVpYTTJ5djhpU1ZoMmQ2QnZObyIsInJpZCI6ImM0ZTQ2NGRhLTM0YjAtNDI1Zi04NTBlLTAxM2U4OWVjOWU5YyJ9._Ib0ChcvCfDY5lzbUKFThJ9lUfHEy0LsLsadImEkFs8K39y0yE1RiQNqoHDG30gDCQF88Ap0YFkGemqCy89zBg"
 
-# Creación de tablas
-c.execute(
+conn = libsql_client.connect(url=url, auth_token=auth_token)
+
+# Función auxiliar para ejecutar consultas y retornar DataFrames fácilmente
+def ejecutar_sql_df(query, params=()):
+    res = conn.execute(query, params)
+    rows = res.rows
+    cols = [col.name for col in res.columns] if res.columns else []
+    return pd.DataFrame(rows, columns=cols)
+
+# Creación de tablas en Turso
+conn.execute(
     """CREATE TABLE IF NOT EXISTS productos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 codigo TEXT UNIQUE,
@@ -29,7 +38,7 @@ c.execute(
             )"""
 )
 
-c.execute(
+conn.execute(
     """CREATE TABLE IF NOT EXISTS clientes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 cedula TEXT UNIQUE,
@@ -39,7 +48,7 @@ c.execute(
             )"""
 )
 
-c.execute(
+conn.execute(
     """CREATE TABLE IF NOT EXISTS ventas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 fecha TEXT,
@@ -51,30 +60,27 @@ c.execute(
             )"""
 )
 
-c.execute(
+conn.execute(
     """CREATE TABLE IF NOT EXISTS detalle_ventas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 venta_id INTEGER,
                 producto TEXT,
                 cantidad INTEGER,
                 precio_unitario REAL,
-                subtotal REAL,
-                FOREIGN KEY (venta_id) REFERENCES ventas (id)
+                subtotal REAL
             )"""
 )
 
-c.execute(
+conn.execute(
     """CREATE TABLE IF NOT EXISTS cuentas_por_cobrar (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 venta_id INTEGER,
                 cliente TEXT,
                 monto_total REAL,
                 monto_pendiente REAL,
-                estado TEXT,
-                FOREIGN KEY (venta_id) REFERENCES ventas (id)
+                estado TEXT
             )"""
 )
-conn.commit()
 
 # Control de sesión
 if "rol" not in st.session_state:
@@ -105,8 +111,8 @@ opcion = st.sidebar.radio("Navegación", menu)
 if opcion == "🛒 Registrar Venta":
     st.header("🛒 Punto de Venta")
 
-    productos_df = pd.read_sql_query("SELECT * FROM productos", conn)
-    clientes_df = pd.read_sql_query("SELECT * FROM clientes", conn)
+    productos_df = ejecutar_sql_df("SELECT * FROM productos")
+    clientes_df = ejecutar_sql_df("SELECT * FROM clientes")
 
     if productos_df.empty:
         st.warning(
@@ -119,9 +125,9 @@ if opcion == "🛒 Registrar Venta":
             st.subheader("Seleccionar Producto")
             prod_sel = st.selectbox(
                 "Producto",
-                productos_df["codigo"]
+                productos_df["codigo"].astype(str)
                 + " - "
-                + productos_df["nombre"]
+                + productos_df["nombre"].astype(str)
                 + " (Stock: "
                 + productos_df["stock"].astype(str)
                 + ")",
@@ -131,7 +137,7 @@ if opcion == "🛒 Registrar Venta":
             if st.button("Agregar al Carrito"):
                 codigo_prod = prod_sel.split(" - ")[0]
                 p_info = productos_df[
-                    productos_df["codigo"] == codigo_prod
+                    productos_df["codigo"].astype(str) == codigo_prod
                 ].iloc[0]
                 if cant > int(p_info["stock"]):
                     st.error("No hay suficiente stock disponible.")
@@ -200,57 +206,54 @@ if opcion == "🛒 Registrar Venta":
 
             if st.button("Procesar Venta"):
                 fecha_actual = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                c.execute(
-                    "INSERT INTO ventas (fecha, cliente, tipo_pago,"
-                    " metodo_pago, total, vendedor) VALUES (?, ?, ?, ?, ?, ?)",
+                
+                # Insertar venta
+                res_venta = conn.execute(
+                    "INSERT INTO ventas (fecha, cliente, tipo_pago, metodo_pago, total, vendedor) VALUES (?, ?, ?, ?, ?, ?)",
                     (
                         fecha_actual,
                         cliente_nombre if cliente_nombre else "General",
                         tipo_pago,
                         metodo_pago,
-                        total_venta,
+                        float(total_venta),
                         rol_usuario,
                     ),
                 )
-                venta_id = c.lastrowid
+                
+                # Obtener el último ID insertado en Turso
+                venta_id = res_venta.last_rowid
 
                 for item in st.session_state["carrito"]:
                     subtotal = item["precio"] * item["cantidad"]
-                    c.execute(
-                        "INSERT INTO detalle_ventas (venta_id, producto,"
-                        " cantidad, precio_unitario, subtotal) VALUES (?, ?,"
-                        " ?, ?, ?)",
+                    conn.execute(
+                        "INSERT INTO detalle_ventas (venta_id, producto, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)",
                         (
-                            venta_id,
-                            item["nombre"],
-                            item["cantidad"],
-                            item["precio"],
-                            subtotal,
+                            int(venta_id),
+                            str(item["nombre"]),
+                            int(item["cantidad"]),
+                            float(item["precio"]),
+                            float(subtotal),
                         ),
                     )
-                    c.execute(
-                        "UPDATE productos SET stock = stock - ? WHERE codigo ="
-                        " ?",
-                        (item["cantidad"], item["codigo"]),
+                    conn.execute(
+                        "UPDATE productos SET stock = stock - ? WHERE codigo = ?",
+                        (int(item["cantidad"]), str(item["codigo"])),
                     )
 
                 if tipo_pago == "Crédito (A plazo)":
-                    c.execute(
-                        "INSERT INTO cuentas_por_cobrar (venta_id, cliente,"
-                        " monto_total, monto_pendiente, estado) VALUES (?, ?,"
-                        " ?, ?, ?)",
+                    conn.execute(
+                        "INSERT INTO cuentas_por_cobrar (venta_id, cliente, monto_total, monto_pendiente, estado) VALUES (?, ?, ?, ?, ?)",
                         (
-                            venta_id,
-                            cliente_nombre if cliente_nombre else "General",
-                            total_venta,
-                            total_venta,
+                            int(venta_id),
+                            str(cliente_nombre if cliente_nombre else "General"),
+                            float(total_venta),
+                            float(total_venta),
                             "Pendiente",
                         ),
                     )
 
-                conn.commit()
                 st.session_state["carrito"] = []
-                st.success("¡Venta registrada exitosamente!")
+                st.success("¡Venta registrada exitosamente en la nube!")
                 st.rerun()
 
 # ----------------------------------------------------
@@ -272,18 +275,16 @@ elif opcion == "📦 Inventario de Productos":
                 submitted = st.form_submit_button("Guardar Producto")
                 if submitted:
                     try:
-                        c.execute(
-                            "INSERT INTO productos (codigo, nombre, categoria,"
-                            " precio, costo, stock) VALUES (?, ?, ?, ?, ?, ?)",
-                            (codigo, nombre, categoria, precio, costo, stock),
+                        conn.execute(
+                            "INSERT INTO productos (codigo, nombre, categoria, precio, costo, stock) VALUES (?, ?, ?, ?, ?, ?)",
+                            (codigo, nombre, categoria, float(precio), float(costo), int(stock)),
                         )
-                        conn.commit()
                         st.success("Producto agregado correctamente.")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
 
-    df_prod = pd.read_sql_query("SELECT * FROM productos", conn)
+    df_prod = ejecutar_sql_df("SELECT * FROM productos")
     st.dataframe(df_prod, use_container_width=True)
 
 # ----------------------------------------------------
@@ -300,18 +301,16 @@ elif opcion == "👥 Clientes":
             sub_cli = st.form_submit_button("Guardar Cliente")
             if sub_cli:
                 try:
-                    c.execute(
-                        "INSERT INTO clientes (cedula, nombre, telefono,"
-                        " direccion) VALUES (?, ?, ?, ?)",
+                    conn.execute(
+                        "INSERT INTO clientes (cedula, nombre, telefono, direccion) VALUES (?, ?, ?, ?)",
                         (cedula, nombre, telefono, direccion),
                     )
-                    conn.commit()
                     st.success("Cliente registrado con éxito.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error al registrar cliente: {e}")
 
-    df_cli = pd.read_sql_query("SELECT * FROM clientes", conn)
+    df_cli = ejecutar_sql_df("SELECT * FROM clientes")
     st.dataframe(df_cli, use_container_width=True)
 
 # ----------------------------------------------------
@@ -320,8 +319,8 @@ elif opcion == "👥 Clientes":
 elif opcion == "💳 Cuentas por Cobrar":
     st.header("💳 Cuentas por Cobrar")
 
-    cxc_df = pd.read_sql_query(
-        "SELECT * FROM cuentas_por_cobrar WHERE estado = 'Pendiente'", conn
+    cxc_df = ejecutar_sql_df(
+        "SELECT * FROM cuentas_por_cobrar WHERE estado = 'Pendiente'"
     )
 
     if not cxc_df.empty:
@@ -332,19 +331,19 @@ elif opcion == "💳 Cuentas por Cobrar":
             "Seleccionar Deuda",
             cxc_df["id"].astype(str)
             + " - Cliente: "
-            + cxc_df["cliente"]
+            + cxc_df["cliente"].astype(str)
             + " - Pendiente:  $"
             + cxc_df["monto_pendiente"].astype(str),
         )
         selected_id = int(cxc_sel.split(" - ")[0])
-        monto_act = cxc_df[cxc_df["id"] == selected_id][
-            "monto_pendiente"
-        ].values[0]
+        monto_act = float(
+            cxc_df[cxc_df["id"] == selected_id]["monto_pendiente"].values[0]
+        )
 
         monto_pago = st.number_input(
             "Monto a Abonar ($)",
             min_value=0.01,
-            max_value=float(monto_act),
+            max_value=monto_act,
             format="%.2f",
         )
 
@@ -353,11 +352,10 @@ elif opcion == "💳 Cuentas por Cobrar":
             nuevo_estado = (
                 "Pagado" if nuevo_pendiente <= 0 else "Pendiente"
             )
-            c.execute(
+            conn.execute(
                 "UPDATE cuentas_por_cobrar SET monto_pendiente = ?, estado = ? WHERE id = ?",
-                (nuevo_pendiente, nuevo_estado, selected_id),
+                (float(nuevo_pendiente), str(nuevo_estado), int(selected_id)),
             )
-            conn.commit()
             st.success("Pago registrado correctamente.")
             st.rerun()
     else:
@@ -369,7 +367,7 @@ elif opcion == "💳 Cuentas por Cobrar":
 elif opcion == "📊 Reportes de Ventas":
     st.header("📊 Reportes y Finanzas")
 
-    df_v = pd.read_sql_query("SELECT * FROM ventas", conn)
+    df_v = ejecutar_sql_df("SELECT * FROM ventas")
     st.subheader("Historial de Ventas")
     st.dataframe(df_v, use_container_width=True)
 
@@ -387,10 +385,9 @@ elif opcion == "📊 Reportes de Ventas":
             )
             if st.button("Borrar Solo Ventas"):
                 if confirm_ventas:
-                    c.execute("DELETE FROM ventas")
-                    c.execute("DELETE FROM detalle_ventas")
-                    c.execute("DELETE FROM cuentas_por_cobrar")
-                    conn.commit()
+                    conn.execute("DELETE FROM ventas")
+                    conn.execute("DELETE FROM detalle_ventas")
+                    conn.execute("DELETE FROM cuentas_por_cobrar")
                     st.success(
                         "✅ Historial de ventas limpiado correctamente."
                     )
@@ -407,12 +404,11 @@ elif opcion == "📊 Reportes de Ventas":
             )
             if st.button("REINICIAR SISTEMA COMPLETO"):
                 if confirm_todo:
-                    c.execute("DELETE FROM ventas")
-                    c.execute("DELETE FROM detalle_ventas")
-                    c.execute("DELETE FROM cuentas_por_cobrar")
-                    c.execute("DELETE FROM productos")
-                    c.execute("DELETE FROM clientes")
-                    conn.commit()
+                    conn.execute("DELETE FROM ventas")
+                    conn.execute("DELETE FROM detalle_ventas")
+                    conn.execute("DELETE FROM cuentas_por_cobrar")
+                    conn.execute("DELETE FROM productos")
+                    conn.execute("DELETE FROM clientes")
                     if "carrito" in st.session_state:
                         st.session_state["carrito"] = []
                     st.success(
