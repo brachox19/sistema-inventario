@@ -103,7 +103,6 @@ if not st.session_state["logged_in"]:
         submit_login = st.form_submit_button("Entrar al Sistema")
         
         if submit_login:
-            # Contraseñas configuradas por defecto (puedes cambiarlas aquí)
             if usuario_input == "admin" and password_input == "admin123":
                 st.session_state["logged_in"] = True
                 st.session_state["rol"] = "admin"
@@ -116,7 +115,7 @@ if not st.session_state["logged_in"]:
                 st.rerun()
             else:
                 st.error("Contraseña incorrecta. Inténtalo de nuevo.")
-    st.stop() # Detiene la ejecución hasta que inicie sesión correctamente
+    st.stop()
 
 if "carrito" not in st.session_state:
     st.session_state["carrito"] = []
@@ -151,9 +150,7 @@ if opcion == "🛒 Registrar Venta":
     clientes_df = ejecutar_sql_df("SELECT * FROM clientes")
 
     if productos_df.empty:
-        st.warning(
-            "No hay productos en el inventario. Agrega productos primero."
-        )
+        st.warning("No hay productos en el inventario. Agrega productos primero.")
     else:
         col_1, col_2 = st.columns([2, 1])
 
@@ -224,9 +221,7 @@ if opcion == "🛒 Registrar Venta":
             if clientes_df.empty:
                 cliente_nombre = st.text_input("Nombre del Cliente (Opcional)")
             else:
-                cliente_opciones = ["Cliente General"] + list(
-                    clientes_df["nombre"]
-                )
+                cliente_opciones = ["Cliente General"] + list(clientes_df["nombre"])
                 cliente_sel = st.selectbox("Cliente", cliente_opciones)
                 cliente_nombre = (
                     "" if cliente_sel == "Cliente General" else cliente_sel
@@ -293,36 +288,68 @@ if opcion == "🛒 Registrar Venta":
                 st.rerun()
 
 # ----------------------------------------------------
-# INVENTARIO DE PRODUCTOS
+# INVENTARIO DE PRODUCTOS (CON PESTAÑAS DE AGREGAR Y EDITAR)
 # ----------------------------------------------------
 elif opcion == "📦 Inventario de Productos":
     st.header("📦 Inventario de Productos")
+    
+    df_prod = ejecutar_sql_df("SELECT * FROM productos")
+
     if st.session_state["rol"] == "admin":
-        with st.expander("Agregar Nuevo Producto"):
+        tab1, tab2 = st.tabs(["➕ Agregar Producto", "✏️ Editar Producto"])
+        
+        with tab1:
             with st.form("form_prod"):
                 codigo = st.text_input("Código")
                 nombre = st.text_input("Nombre del Producto")
                 categoria = st.text_input("Categoría")
-                precio = st.number_input(
-                    "Precio de Venta", min_value=0.0, format="%.2f"
-                )
+                precio = st.number_input("Precio de Venta", min_value=0.0, format="%.2f")
                 costo = st.number_input("Costo", min_value=0.0, format="%.2f")
                 stock = st.number_input("Stock Inicial", min_value=0, step=1)
                 submitted = st.form_submit_button("Guardar Producto")
                 if submitted:
                     try:
                         conn.execute(
-                            "INSERT INTO productos (codigo, nombre, categoria, precio, costo, stock) VALUES (?, ?, ?, ?, ?, ?)",
+                            "INSERT OR REPLACE INTO productos (codigo, nombre, categoria, precio, costo, stock) VALUES (?, ?, ?, ?, ?, ?)",
                             (codigo, nombre, categoria, float(precio), float(costo), int(stock)),
                         )
                         conn.commit()
-                        st.success("Producto agregado correctamente.")
+                        st.success("¡Producto guardado correctamente!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al guardar: {e}")
 
-    df_prod = ejecutar_sql_df("SELECT * FROM productos")
-    st.dataframe(df_prod, use_container_width=True)
+        with tab2:
+            if not df_prod.empty:
+                prod_a_editar = st.selectbox("Selecciona el código del producto a editar", df_prod["codigo"].astype(str))
+                p_actual = df_prod[df_prod["codigo"].astype(str) == prod_a_editar].iloc[0]
+                
+                with st.form("form_edit_prod"):
+                    nuevo_nombre = st.text_input("Nombre del Producto", value=str(p_actual["nombre"]))
+                    nueva_categoria = st.text_input("Categoría", value=str(p_actual["categoria"]))
+                    nuevo_precio = st.number_input("Precio de Venta", min_value=0.0, value=float(p_actual["precio"]), format="%.2f")
+                    nuevo_costo = st.number_input("Costo", min_value=0.0, value=float(p_actual["costo"]), format="%.2f")
+                    nuevo_stock = st.number_input("Stock", min_value=0, value=int(p_actual["stock"]), step=1)
+                    
+                    edit_submitted = st.form_submit_button("Actualizar Producto")
+                    if edit_submitted:
+                        try:
+                            conn.execute(
+                                """UPDATE productos 
+                                   SET nombre = ?, categoria = ?, precio = ?, costo = ?, stock = ? 
+                                   WHERE codigo = ?""",
+                                (nuevo_nombre, nueva_categoria, float(nuevo_precio), float(nuevo_costo), int(nuevo_stock), prod_a_editar),
+                            )
+                            conn.commit()
+                            st.success("¡Producto actualizado exitosamente en la base de datos!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error al actualizar: {e}")
+            else:
+                st.info("No hay productos registrados para editar.")
+
+    df_prod_actualizado = ejecutar_sql_df("SELECT * FROM productos")
+    st.dataframe(df_prod_actualizado, use_container_width=True)
 
 # ----------------------------------------------------
 # CLIENTES
@@ -428,14 +455,10 @@ elif opcion == "📊 Reportes de Ventas":
                     conn.execute("DELETE FROM detalle_ventas")
                     conn.execute("DELETE FROM cuentas_por_cobrar")
                     conn.commit()
-                    st.success(
-                        "✅ Historial de ventas limpiado correctamente."
-                    )
+                    st.success("✅ Historial de ventas limpiado correctamente.")
                     st.rerun()
                 else:
-                    st.error(
-                        "Debes marcar la casilla de confirmación para proceder."
-                    )
+                    st.error("Debes marcar la casilla de confirmación para proceder.")
 
         with col2:
             st.subheader("🔥 Reiniciar Todo el Sistema")
@@ -452,11 +475,7 @@ elif opcion == "📊 Reportes de Ventas":
                     conn.commit()
                     if "carrito" in st.session_state:
                         st.session_state["carrito"] = []
-                    st.success(
-                        "✅ La base de datos ha sido reiniciada completamente."
-                    )
+                    st.success("✅ La base de datos ha sido reiniciada completamente.")
                     st.rerun()
                 else:
-                    st.error(
-                        "Debes marcar la casilla de confirmación para proceder."
-                    )
+                    st.error("Debes marcar la casilla de confirmación para proceder.")
