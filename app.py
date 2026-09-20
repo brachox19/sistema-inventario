@@ -577,42 +577,43 @@ else:
     )
 
     if not cxc_df.empty:
-      st.dataframe(cxc_df, use_container_width=True)
+        st.dataframe(cxc_df, use_container_width=True)
 
-      st.subheader("Registrar Pago / Abono")
-      cxc_sel = st.selectbox(
-          "Seleccionar Deuda",
-          cxc_df["id"].astype(str)
-          + " - Cliente: "
-          + cxc_df["cliente"]
-          + " - Pendiente: $"
-          + cxc_df["monto_pendiente"].astype(str),
-      )
-      selected_id = int(cxc_sel.split(" - ")[0])
-      monto_act = cxc_df[cxc_df["id"] == selected_id][
-          "monto_pendiente"
-      ].values[0]
-
-      monto_pago = st.number_input(
-          "Monto a Abonar ($)",
-          min_value=0.01,
-          max_value=float(monto_act),
-          format="%.2f",
-      )
-
-      if st.button("Registrar Abonado"):
-        nuevo_pendiente = monto_act - monto_pago
-        nuevo_estado = "Pagado" if nuevo_pendiente <= 0 else "Pendiente"
-        c.execute(
-            "UPDATE cuentas_por_cobrar SET monto_pendiente = ?, estado = ? WHERE"
-            " id = ?",
-            (nuevo_pendiente, nuevo_estado, selected_id),
+        st.subheader("Registrar Pago / Abono")
+        cxc_sel = st.selectbox(
+            "Seleccionar Deuda",
+            cxc_df["id"].astype(str)
+            + " - Cliente: "
+            + cxc_df["cliente"]
+            + " - Pendiente:  $"
+            + cxc_df["monto_pendiente"].astype(str),
         )
-        conn.commit()
-        st.success("Pago registrado correctamente.")
-        st.rerun()
+        selected_id = int(cxc_sel.split(" - ")[0])
+        monto_act = cxc_df[cxc_df["id"] == selected_id][
+            "monto_pendiente"
+        ].values[0]
+
+        monto_pago = st.number_input(
+            "Monto a Abonar ($)",
+            min_value=0.01,
+            max_value=float(monto_act),
+            format="%.2f",
+        )
+
+        if st.button("Registrar Abonado"):
+            nuevo_pendiente = monto_act - monto_pago
+            nuevo_estado = (
+                "Pagado" if nuevo_pendiente <= 0 else "Pendiente"
+            )
+            c.execute(
+                "UPDATE cuentas_por_cobrar SET monto_pendiente = ?, estado = ? WHERE id = ?",
+                (nuevo_pendiente, nuevo_estado, selected_id),
+            )
+            conn.commit()
+            st.success("Pago registrado correctamente.")
+            st.rerun()
     else:
-      st.info("No hay cuentas pendientes por cobrar.")
+        st.info("No hay cuentas pendientes por cobrar.")
 
   # ----------------------------------------------------
   # REPORTES DE VENTAS (ADMIN)
